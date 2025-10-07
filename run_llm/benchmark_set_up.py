@@ -54,6 +54,7 @@ class PubMedQALSWE(Benchmark):
                 predictions.append("kanske")
             else:
                 predictions.append("missformat")
+            
         return np.asarray(predictions)
 
     def final_prompt_format(self, v):

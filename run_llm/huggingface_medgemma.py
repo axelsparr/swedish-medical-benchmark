@@ -1,3 +1,4 @@
+
 import json
 import datetime
 from functools import lru_cache
@@ -34,8 +35,8 @@ BENCHMARKS = [
         + "\n\nFråga:\n{question} svara bara 'ja', 'nej' eller 'kanske'"
     ),
     # Uncomment to also run the GeneralPractioner benchmark
-    # benchmarks.GeneralPractioner(
-    #     prompt=GeneralPractioner_SYSTEM_PROMPT
+    #benchmarks.EmergencyMedicine(
+    #     prompt=
     #     + "\n\nFråga:\n{question}\nAlternativ:{options}\n\nSvara endast ett av alternativen."
     #),
     # benchmarks.SwedishDoctorsExam(prompt=SwedishDoctorsExam + "\n\nFråga:\n{question}\n\nSvara med endast ett av alternativen. Svara med hela svarsalternativet."),
@@ -44,30 +45,31 @@ BENCHMARKS = [
 # Functions
 # =========
 @lru_cache(maxsize=1)
-def load_pipeline(
-    model=MODEL_NAME,
-) -> transformers.pipelines.text_generation.TextGenerationPipeline:
+def load_pipeline(model=MODEL_NAME):
     model_kwargs = dict(
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto",
     )
     if USE_QUANTIZATION:
         model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
 
-    return transformers.pipeline(
-        "text-generation", model=model, model_kwargs=model_kwargs
-    )
+    # Use the correct task for medgemma-4b-it
+    pipe = transformers.pipeline("image-text-to-text", model=model, model_kwargs=model_kwargs)
+    pipe.model.generation_config.do_sample = False
+    return pipe
 
 
-def get_response(messages: list[str]) -> str:
-    response = messages[0]["generated_text"][-1]
-    assert response["role"] == "assistant"
-    return response["content"].lower()
+def build_messages(system_text: str, prompt: str):
+    return [
+        {"role": "system", "content": [{"type": "text", "text": system_text}]},
+        {"role": "user",   "content": [{"type": "text", "text": prompt}]},
+    ]
 
-
-def fmt_message(role: str, content: str) -> dict[str, str]:
-    return {"role": role, "content": content}
-
+def get_response(pipe_output) -> str:
+    # MedGemma pipeline returns: [{'generated_text': [ {...}, {'role':'assistant','content':'...'} ]}]
+    last_turn = pipe_output[0]["generated_text"][-1]
+    assert last_turn["role"] == "assistant", f"Unexpected output: {pipe_output}"
+    return last_turn["content"].strip().lower()
 
 def timestamp():
     return datetime.datetime.now().isoformat()
@@ -88,15 +90,17 @@ if __name__ == "__main__":
     for benchmark in BENCHMARKS:
         llm_results = []
         ids = []
-        ground_truths = benchmark.get_ground_truth()
+        ground_truths = benchmark.get_ground_truth()[:10]
+        sample_items = list(benchmark.data.items())[:10]
 
-        for k, v in tqdm(benchmark.data.items(), desc=f"Processing {benchmark.name}"):
-            messages = [
-                fmt_message("user", benchmark.prompt.format(question=v["QUESTION"]))
-            ]
+        for k, v in tqdm(sample_items, desc=f"Processing {benchmark.name}"):
+            messages = build_messages(
+                benchmark.prompt,
+                benchmark.prompt.format(question=v["QUESTION"]),
+            )
             out = pipeline(
-                messages,
-                max_new_tokens=benchmark.max_tokens,
+                text=messages,                     
+                max_new_tokens=max(benchmark.max_tokens, 32),
                 do_sample=PIPELINE_PARAMS["do_sample"],
             )
             llm_results.append(get_response(out))
