@@ -13,11 +13,10 @@ import benchmark_set_up as benchmarks
 
 # Configuration
 # =============
-MODEL_VARIANT = "4b-it"
-MODEL_NAME = f"google/medgemma-{MODEL_VARIANT}"
+MODEL_NAME = "microsoft/Phi-3.5-mini-instruct"
 USE_QUANTIZATION = True
 PIPELINE_PARAMS = {"do_sample": False}
-
+USE_FEW_SHOT = True  # if true we sample the first of each class ie 4 samples
 print("torch:", torch.__version__)
 print("torch cuda runtime:", torch.version.cuda)
 print("is_available:", torch.cuda.is_available())
@@ -37,7 +36,7 @@ BENCHMARKS = [
     # Uncomment to also run the GeneralPractioner benchmark
     benchmarks.EmergencyMedicine(
          prompt=GeneralPractioner_SYSTEM_PROMPT
-         + "\n\nFråga:\n{question}\n\nSvara endast ett av alternativen. Svara endast med en bokstav. Tex. \"d\" som det ska vara alternativ d)"
+         + " Svara endast med en bokstav."
     ),
     # benchmarks.SwedishDoctorsExam(prompt=SwedishDoctorsExam + "\n\nFråga:\n{question}\n\nSvara med endast ett av alternativen. Svara med hela svarsalternativet."),
 ]
@@ -54,25 +53,52 @@ def load_pipeline(model=MODEL_NAME):
         model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
 
     # Use the correct task for medgemma-4b-it
-    pipe = transformers.pipeline("image-text-to-text", model=model, model_kwargs=model_kwargs)
+    pipe = pipeline("text-generation",
+                     model=model,
+                     model_kwargs=model_kwargs,
+                     trust_remote_code=False)
     pipe.model.generation_config.do_sample = False
     return pipe
 
 
 def build_messages(system_text: str, prompt: str):
     return [
-        {"role": "system", "content": [{"type": "text", "text": system_text}]},
-        {"role": "user",   "content": [{"type": "text", "text": prompt}]},
+        {"role": "system", "content": system_text},
+        {"role": "user", "content": prompt}
     ]
+def build_messages_few_shot(system_text: str, prompt: str, example_prompts: list[str], example_answers: list[str]):
+    assert len(example_prompts) == len(example_answers)
+    message_history = [{"role": "system", "content": system_text}] 
+    for i in range(len(example_prompts)):
+        message_history.append({"role": "user", "content": example_prompts[i]})
+        message_history.append({"role": "assistant", "content": example_answers[i]})
+    message_history.append({"role": "user", "content": prompt})
+    return message_history
+
 
 def get_response(pipe_output) -> str:
-    # MedGemma pipeline returns: [{'generated_text': [ {...}, {'role':'assistant','content':'...'} ]}]
-    last_turn = pipe_output[0]["generated_text"][-1]
-    assert last_turn["role"] == "assistant", f"Unexpected output: {pipe_output}"
-    return last_turn["content"].strip().lower()
-
+    text = pipe_output[0]["generated_text"]
+    return text[-1]["content"].strip()
 def timestamp():
     return datetime.datetime.now().isoformat()
+def few_shot_eval_split(items_kv, answers):
+    #extract the first item from each class and return the rest as sample_items
+    answers = list(map(str, answers))
+    example_prompts, example_answers = [], []
+   
+    taken = {c: False for c in ["a","b","c","d"]}
+    chosen_keys = []
+    for i,(k, v) in enumerate(items_kv):
+        y = answers[i]
+        if y in taken and not taken[y]:
+            chosen_keys.append(k)
+            taken[y] = True
+            example_answers.append(answers[i])
+            example_prompts.append(v["Question"])
+            items_kv.pop(i)
+            answers.pop(i)
+    print("Few shot examples chosen with keys:", chosen_keys)
+    return items_kv, answers, example_prompts, example_answers
 
 
 # Main
@@ -91,37 +117,53 @@ if __name__ == "__main__":
         llm_results = []
         ids = []
         ground_truths = benchmark.get_ground_truth()
-        sample_items = list(benchmark.data.items())
+        benchmark_prompts = list(benchmark.data.items())
+        
+        # split in to few shot examples and evaluation data, like "train/test"
+        if USE_FEW_SHOT:
+            benchmark_prompts,benchmark_answer, example_prompts, example_answers = few_shot_eval_split(
+                benchmark_prompts, ground_truths)
 
-        for k, v in tqdm(sample_items, desc=f"Processing {benchmark.name}"):
+        for k, v in tqdm(benchmark_prompts, desc=f"Processing {benchmark.name}"):
             if isinstance(benchmark,benchmarks.PubMedQALSWE):
                 question =  v["QUESTION"]
             elif isinstance(benchmark,benchmarks.EmergencyMedicine):
                 question=v["Question"]
-            messages = build_messages(
-                benchmark.prompt,
-                benchmark.prompt.format(question=question),
-            )
+            if USE_FEW_SHOT:
+                
+                messages = build_messages_few_shot(
+                    benchmark.prompt,
+                    question,
+                    example_prompts,
+                    example_answers
+                )
+            else:
+                messages = build_messages(
+                    benchmark.prompt,
+                    question
+                )
+            #print("Messages:", messages)
             out = pipeline(
-                text=messages,                     
+                text_inputs=messages,                     
                 max_new_tokens=max(benchmark.max_tokens, 32),
                 do_sample=PIPELINE_PARAMS["do_sample"],
             )
-            llm_results.append(get_response(out))
+            #print("current k:",k)
+            llm_results.append(get_response(out)[0].lower())  # only get the first character
             predictions = benchmark.detect_answers(llm_results)
             ids.append(k)
             result[benchmark.name] = {
                 "prompt": benchmark.prompt,
-                "ground_truths": ground_truths.tolist(),
+                "ground_truths": benchmark_answer,
                 "predictions": predictions.tolist(),
                 "ids": ids,
             }
             with open("./results.json", "w") as f:
                 json.dump(result, f)
 
-        assert len(ground_truths) == len(predictions)
+        assert len(benchmark_answer) == len(predictions)
 
-        print(f"Accuracy {(predictions == ground_truths).sum() / len(ground_truths)}")
+        print(f"Accuracy {(predictions == benchmark_answer).sum() / len(benchmark_answer)}")
         print(f"Malformed answers {(predictions == 'missformat').sum()}")
 
     print(

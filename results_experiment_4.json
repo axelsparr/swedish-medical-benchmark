@@ -1,0 +1,49 @@
+{
+    "llm_info": {
+        "model": "google/medgemma-4b-it",
+        "pipeline_params": {
+            "do_sample": false
+        },
+        "use_quantization": true,
+        "model_run": "2025-10-15T11:25:45.296743"
+    },
+    "EmergencyMedicine": {
+        "prompt": "Du är en utmärkt läkare och skriver ett läkarprov. Var vänlig och överväg varje aspekt av medicinska frågan nedan noggrant. Ta en stund, andas djupt, och när du känner dig redo, vänligen svara med endast ett av alternativen.\n\nFråga:\n{question}\n\nSvara endast ett av alternativen.",
+        "ground_truths": [
+            "c) addisons sjukdom",
+            "c) hydrokortison intravenã¶st",
+            "a) peroral kortisonsubstitution och mineralkortikoid",
+            "b) ã–ka dosen av hydrokortison vid feber",
+            "c) appendicit",
+            "b) smã¤rtlindring och uppvã¤tskning",
+            "b) ultraljud av buken",
+            "c) pã¥bã¶rja intensivvã¤tskeersã¤ttning och ã¶vervã¤ga kirurgisk intervention",
+            "c) appendicit",
+            "d) ultraljud"
+        ],
+        "predictions": [
+            "c",
+            "c",
+            "a",
+            "**b) öka dosen av hydrokortison vid feber**\n\n**motivering:**\n\naddisons sjukdom är en tillstånd där biskarvan inte producerar tillräckligt med kortisol. kortisol är viktigt för att reglera blodsocker, blodtryck och elektrolytbalansen. vid en akut sjukdom som feber eller annan infektion kan anna behöva öka sin kortisol dos för att kompensera för den förlorade kortisolproduktionen. att sluta ta medicinen (c) kan vara farligt eftersom det kan leda till en allvarlig förvärring av hennes tillstånd. att bara ta medicin vid allvarliga symtom (d) är inte tillräckligt, eftersom feber och infektioner kan vara allvarliga och kräva en omedelbar ökning av kortisol. att fortsätta med samma dos (a) är inte tillräckligt eftersom hon inte har till",
+            "c",
+            "b",
+            "b",
+            "c",
+            "c",
+            "d"
+        ],
+        "ids": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10"
+        ]
+    }
+}

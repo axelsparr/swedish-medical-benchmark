@@ -1,3 +1,4 @@
+import argparse
 import json
 import numpy as np
 
@@ -15,7 +16,7 @@ from collections import defaultdict
 
 # Configuration
 # =============
-PATH = "results.json"  # Path to the results file
+
 PRINT_ALL = False  # Print all groups or just the top 5
 INCLUDE_ALL_METRICS_IN_PROPERTY = False  # Include all metrics in the property ranking
 RANK_BY = "f1"  # This is due to the unbalanced data. Can be: "accuracy", "precision", "recall", "f1"
@@ -56,6 +57,10 @@ def print_metrics(metrics: dict):
     printo(f"F1: {metrics['f1']}")
     printo(f"Confusion Matrix:\n{metrics['confusion_matrix']}")
 
+    #print with 2 decimals
+    printo(f"Average F1: {np.mean(metrics['f1']):.2f}")
+    printo(f"Average precision: {np.mean(metrics['precision']):.2f}")
+    printo(f"Average recall: {np.mean(metrics['recall']):.2f}")
 
 def get_groups_by_property(ids: list[str], property: str, benchmark: Benchmark):
     groups = defaultdict(list[int])
@@ -84,6 +89,12 @@ def evaluate_property(benchmark_results, property_groups):
 # Main
 # ====
 if __name__ == "__main__":
+    #make path a cli parameter
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", type=str, default="./results.json")
+    args = parser.parse_args()
+    PATH = args.path
     # Load the results
     with open(PATH, "r") as f:
         results = json.load(f)
@@ -93,10 +104,11 @@ if __name__ == "__main__":
         printo(f"\n\nBenchmark: {benchmark_name}")
         printo("=====================================")
         benchmark = get_benchmark_by_name(benchmark_name)
-
+        print(len(benchmark_results["predictions"]),len(benchmark_results["ground_truths"]))
+        num_predicted = len(benchmark_results["predictions"])
         # Evaluate the overall performance
         metrics = calculate_metrics(
-            benchmark_results["ground_truths"], benchmark_results["predictions"]
+            benchmark_results["ground_truths"][:num_predicted], benchmark_results["predictions"]
         )
         printo("Overall performance:")
         printo("--------------------")

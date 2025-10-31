@@ -19,16 +19,18 @@ USE_QUANTIZATION = True
 PIPELINE_PARAMS = {"do_sample": False}
 
 PubMedQALSWE_SYSTEM_PROMPT = "Var vänlig och överväg varje aspekt av medicinska frågan nedan noggrant. Ta en stund, andas djupt, och när du känner dig redo, vänligen svara med endast ett av de fördefinierade svaren: 'ja', 'nej', eller 'kanske'. Det är viktigt att du begränsar ditt svar till dessa alternativ för att säkerställa tydlighet i kommunikationen."
+GeneralPractioner_SYSTEM_PROMPT = "Du är en utmärkt läkare och skriver ett läkarprov. Var vänlig och överväg varje aspekt av medicinska frågan nedan noggrant. Ta en stund, andas djupt, och när du känner dig redo, vänligen svara med endast ett av alternativen."
+SwedishDoctorsExam = "Du är en utmärkt läkare och skriver ett läkarprov. Var vänlig och överväg varje aspekt av medicinska frågan nedan noggrant. Ta en stund, andas djupt, och när du känner dig redo, vänligen svara med endast ett av alternativen. Svara med hela svarsalternativet. Utöver det är det viktigt att du inte inkluderar någon annan text i ditt svar."
+# Make sure to uncomment the benchmarks you want to run
 BENCHMARKS = [
-    benchmarks.PubMedQALSWE( 
-        prompt=PubMedQALSWE_SYSTEM_PROMPT
-        + "\n\nFråga:\n{question} svara bara 'ja', 'nej' eller 'kanske'"
-    ),
-    # Uncomment to also run the GeneralPractioner benchmark
-    #benchmarks.EmergencyMedicine(
-    #     prompt=
-    #     + "\n\nFråga:\n{question}\nAlternativ:{options}\n\nSvara endast ett av alternativen."
+    #benchmarks.PubMedQALSWE(
+    #    prompt=PubMedQALSWE_SYSTEM_PROMPT
+    #    + "\n\nFråga:\n{question} svara bara 'ja', 'nej' eller 'kanske'"
     #),
+    # Uncomment to also run the GeneralPractioner benchmark
+    benchmarks.EmergencyMedicine(
+         prompt=GeneralPractioner_SYSTEM_PROMPT
+    ),
     # benchmarks.SwedishDoctorsExam(prompt=SwedishDoctorsExam + "\n\nFråga:\n{question}\n\nSvara med endast ett av alternativen. Svara med hela svarsalternativet."),
 ]
 # ========== Guidance model loader ==========
@@ -56,10 +58,20 @@ def zero_shot_yesnomaybe(lm, question: str):
             "Format exakt:\n<reasoning>...</reasoning><prediction>ja|nej|kanske</prediction>"
         )
     with assistant():
-        lm += "<reasoning>" + gen("reasoning", max_tokens=160) + "</reasoning>"
-        lm += "<prediction>" + select(["ja", "nej", "kanske"], name="pred") + "</prediction>"
+        lm += "<reasoning>" + gen("reasoning", max_tokens=250) + "</reasoning>"
+        lm += "<prediction>" + select(["ja", "nej", "kanske"], name="string_choice") + "</prediction>"
     return lm
-
+@guidance
+def zero_shot_abcd(lm, question: str): 
+    with user():
+        lm += (
+            f"Fråga:\n{question}\n"
+            "Format exakt:\n<reasoning>...</reasoning><prediction>a|b|c|d</prediction>"
+        )
+    with assistant():
+        lm += "<reasoning>" + gen("reasoning", max_tokens=250) + "</reasoning>"
+        lm += "<prediction>" + select(["a", "b", "c","d"], name="string_choice") + "</prediction>"
+    return lm
 
 def timestamp():
     return datetime.datetime.now().isoformat()
@@ -79,25 +91,31 @@ if __name__ == "__main__":
     for benchmark in BENCHMARKS:
         llm_results, ids = [], []
         # ground truth and sample selection
-        ground_truths = benchmark.get_ground_truth()[:10]
-        sample_items = list(benchmark.data.items())[:10]
-
+        ground_truths = benchmark.get_ground_truth()
+        sample_items = list(benchmark.data.items())
+        reasonings = []
         with system():
-            language_model += benchmark.prompt + "\nSvara i XML-format."
+            lm += benchmark.prompt + "\nSvara i XML-format."
 
         for k, v in tqdm(sample_items, desc=f"Processing {benchmark.name}"):
+            if isinstance(benchmark,benchmarks.PubMedQALSWE):
+                question =  v["QUESTION"]
+            elif isinstance(benchmark,benchmarks.EmergencyMedicine):
+                question=v["Question"]
             # system = Swedish instruction; user = RAW question only
-            lm_temp = lm + zero_shot_yesnomaybe(question=v["QUESTION"])
+            lm_temp = lm + zero_shot_abcd(question=question)
             pred = lm_temp["string_choice"]
-            print(pred)
+           
             llm_results.append(pred)
             ids.append(k)
-
+            reasonings.append(lm_temp["reasoning"])
+            
             predictions = benchmark.detect_answers(llm_results)
             result[benchmark.name] = {
                 "prompt": benchmark.prompt,
                 "ground_truths": ground_truths.tolist(),
                 "predictions": predictions.tolist(),
+                "reasonings": reasonings,
                 "ids": ids,
             }
             with open("./results.json", "w", encoding="utf-8") as f:

@@ -109,14 +109,15 @@ class EmergencyMedicine(Benchmark):
         self.data = json.loads(
             Path(
                 "./benchmarks/specialist_questions/emergency_medicine/emergency_medicine_clinical_format.json"
-            ).read_text()
+            ).read_text(encoding="utf-8")
         )
         self.prompt = prompt
         self.name = "EmergencyMedicine"
         self.label_tag_groups = []
 
     def get_ground_truth(self):
-        return np.asarray([v["Answer"].lower() for v in self.data.values()])
+        #make it so we only look at the letter for the option
+        return np.asarray([v["Answer"][0].lower() for v in self.data.values()])
 
     def detect_answers(self, llm_answers):
         return np.asarray([i.strip().lower() for i in llm_answers])
