@@ -15,7 +15,7 @@ import benchmark_set_up as benchmarks
 # =============
 MODEL_VARIANT = "4b-it"
 MODEL_NAME = f"google/medgemma-{MODEL_VARIANT}"
-USE_QUANTIZATION = True
+USE_QUANTIZATION = False
 PIPELINE_PARAMS = {"do_sample": False}
 
 print("torch:", torch.__version__)
